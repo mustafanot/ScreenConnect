@@ -2,16 +2,10 @@ name: Build Windows
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - rename-screenconnect
-      - screenconnect
 
 jobs:
   build-windows:
     runs-on: windows-latest
-
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows-static
 
@@ -47,23 +41,6 @@ jobs:
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
           echo ("BINDGEN_EXTRA_CLANG_ARGS=-I{0}" -f `
             (Join-Path $env:VCPKG_ROOT "installed\$env:VCPKG_DEFAULT_TRIPLET\include")) >> $env:GITHUB_ENV
-
-      # Optional: auto-rename “RustDesk” to “Screen Connect”
-      - name: Rename app branding to 'Screen Connect'
-        shell: powershell
-        run: |
-          $pairs = @(
-            @{Path="flutter/windows/runner/Runner.rc"; Patterns=@("RustDesk","rustdesk"); Replace="Screen Connect"},
-            @{Path="flutter/windows/runner/main.cpp"; Patterns=@('L"RustDesk"'); Replace='L"Screen Connect"'},
-            @{Path="flutter/windows/runner/flutter_window.cpp"; Patterns=@('L"RustDesk"'); Replace='L"Screen Connect"'}
-          )
-          foreach ($p in $pairs) {
-            if (Test-Path $p.Path) {
-              $c = Get-Content $p.Path -Raw
-              foreach ($pat in $p.Patterns) { $c = $c -replace [regex]::Escape($pat), $p.Replace }
-              Set-Content $p.Path $c -NoNewline
-            }
-          }
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
