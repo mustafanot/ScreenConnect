@@ -7,55 +7,55 @@ on:
       - main
       - rename-screenconnect
 
-env:
-  CARGO_TERM_COLOR: always
-  VCPKG_ROOT: ${{ github.workspace }}\vcpkg
-  VCPKG_DEFAULT_TRIPLET: x64-windows-static
-  LIBCLANG_PATH: C:\Program Files\LLVM\bin
-
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
 
     steps:
-      # 1️⃣ Checkout source code
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
-      # 2️⃣ Install system dependencies
-      - name: Install dependencies (LLVM + Rust)
-        shell: powershell
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Install dependencies
         run: |
-          choco install llvm -y
-          rustup update stable
-          rustup default stable
+          choco install -y ninja cmake llvm git
+          echo "Dependencies installed."
 
-      # 3️⃣ Install Flutter (for Rustdesk’s Flutter frontend)
-      - name: Install Flutter
-        shell: powershell
-        run: |
-          git clone https://github.com/flutter/flutter.git -b stable $env:USERPROFILE\flutter
-          echo "$env:USERPROFILE\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          flutter config --enable-windows-desktop
-          flutter doctor
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 7ae0b9d7c8bdb8a53acdd0c0d9dc8b31482a3c06
+          vcpkgTriplet: x64-windows-static
+          vcpkgArguments: >
+            opus libvpx libyuv
 
-      # 4️⃣ Bootstrap and prepare vcpkg
-      - name: Bootstrap vcpkg and install required libs
-        shell: powershell
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git
-          .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg.exe install opus:x64-windows-static libvpx:x64-windows-static libyuv:x64-windows-static aom:x64-windows-static
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.19.6"
+          channel: stable
 
-      # 5️⃣ Build the project (Rust + Flutter)
-      - name: Build ScreenConnect
-        shell: powershell
-        run: |
-          cargo build --release
+      - name: Enable Flutter Windows desktop
+        run: flutter config --enable-windows-desktop
 
-      # 6️⃣ Upload compiled EXE as artifact
-      - name: Upload Windows EXE
+      - name: Get Flutter dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build Flutter (Windows)
+        working-directory: flutter
+        run: flutter build windows --release
+
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenConnect-win
-          path: target\release\*.exe
+          name: ScreenConnect-Windows
+          path: flutter/build/windows/x64/runner/Release/
