@@ -3,69 +3,59 @@ name: Build Windows
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master, rename-screenconnect ]
+    branches:
+      - main
+      - rename-screenconnect
+
+env:
+  CARGO_TERM_COLOR: always
+  VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+  VCPKG_DEFAULT_TRIPLET: x64-windows-static
+  LIBCLANG_PATH: C:\Program Files\LLVM\bin
 
 jobs:
   build:
-    runs-on: windows-2022
-    env:
-      VCPKG_DEFAULT_TRIPLET: x64-windows-static
-      VCPKG_ROOT: C:\vcpkg
-      LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      BINDGEN_EXTRA_CLANG_ARGS: >
-        -IC:\vcpkg\installed\x64-windows-static\include
-        -IC:\vcpkg\installed\x64-windows-static\include\vpx
-        -IC:\vcpkg\installed\x64-windows-static\include\aom
+    runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
+      # 1️⃣ Checkout source code
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install LLVM (libclang)
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: "17"
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: latest
-
-      - name: Install native deps
+      # 2️⃣ Install system dependencies
+      - name: Install dependencies (LLVM + Rust)
+        shell: powershell
         run: |
-          vcpkg install opus:x64-windows-static libvpx:x64-windows-static libyuv:x64-windows-static aom:x64-windows-static
+          choco install llvm -y
+          rustup update stable
+          rustup default stable
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install FRB tools
+      # 3️⃣ Install Flutter (for Rustdesk’s Flutter frontend)
+      - name: Install Flutter
+        shell: powershell
         run: |
-          cargo install cargo-expand
-          cargo install flutter_rust_bridge_codegen
+          git clone https://github.com/flutter/flutter.git -b stable $env:USERPROFILE\flutter
+          echo "$env:USERPROFILE\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          flutter config --enable-windows-desktop
+          flutter doctor
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: "stable"
-
-      - name: Generate Flutter-Rust bridge
-        run: >
-          flutter_rust_bridge_codegen generate
-          --rust-root .
-          --rust-input crate::flutter_ffi
-          --dart-output flutter\lib\generated_bridge.dart
-
-      - name: Build Rust (release)
-        run: cargo build --release
-
-      - name: Build Flutter Windows (release)
-        working-directory: ./flutter
+      # 4️⃣ Bootstrap and prepare vcpkg
+      - name: Bootstrap vcpkg and install required libs
+        shell: powershell
         run: |
-          flutter pub get
-          flutter build windows --release
+          git clone https://github.com/microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg.exe install opus:x64-windows-static libvpx:x64-windows-static libyuv:x64-windows-static aom:x64-windows-static
 
-      - name: Upload artifacts
+      # 5️⃣ Build the project (Rust + Flutter)
+      - name: Build ScreenConnect
+        shell: powershell
+        run: |
+          cargo build --release
+
+      # 6️⃣ Upload compiled EXE as artifact
+      - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
-          name: screenconnect-windows
-          path: |
-            target\release\*
-            flutter\build\windows\x64\runner\Release\*
+          name: ScreenConnect-win
+          path: target\release\*.exe
