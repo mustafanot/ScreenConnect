@@ -1,0 +1,71 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master, rename-screenconnect ]
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+      VCPKG_ROOT: C:\vcpkg
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+      BINDGEN_EXTRA_CLANG_ARGS: >
+        -IC:\vcpkg\installed\x64-windows-static\include
+        -IC:\vcpkg\installed\x64-windows-static\include\vpx
+        -IC:\vcpkg\installed\x64-windows-static\include\aom
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM (libclang)
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "17"
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: latest
+
+      - name: Install native deps
+        run: |
+          vcpkg install opus:x64-windows-static libvpx:x64-windows-static libyuv:x64-windows-static aom:x64-windows-static
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install FRB tools
+        run: |
+          cargo install cargo-expand
+          cargo install flutter_rust_bridge_codegen
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Generate Flutter-Rust bridge
+        run: >
+          flutter_rust_bridge_codegen generate
+          --rust-root .
+          --rust-input crate::flutter_ffi
+          --dart-output flutter\lib\generated_bridge.dart
+
+      - name: Build Rust (release)
+        run: cargo build --release
+
+      - name: Build Flutter Windows (release)
+        working-directory: ./flutter
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenconnect-windows
+          path: |
+            target\release\*
+            flutter\build\windows\x64\runner\Release\*
