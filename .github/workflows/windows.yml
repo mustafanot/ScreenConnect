@@ -1,65 +1,73 @@
-name: Build Windows
+name: Windows
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    env:
-      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+  build:
+    runs-on: windows-2022
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          fetch-depth: 0
 
-      - name: Install build dependencies
-        run: |
-          choco install -y git cmake ninja llvm
+      - name: Setup MSVC (VS Build Tools)
+        uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Setup vcpkg (manual)
-        shell: cmd
-        run: |
-          git clone https://github.com/microsoft/vcpkg "%RUNNER_TEMP%\vcpkg"
-          "%RUNNER_TEMP%\vcpkg\bootstrap-vcpkg.bat"
-          echo VCPKG_ROOT=%RUNNER_TEMP%\vcpkg>> "%GITHUB_ENV%"
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install libraries via vcpkg
-        shell: powershell
-        run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install `
-            opus:$env:VCPKG_DEFAULT_TRIPLET `
-            libvpx:$env:VCPKG_DEFAULT_TRIPLET `
-            libyuv:$env:VCPKG_DEFAULT_TRIPLET `
-            aom:$env:VCPKG_DEFAULT_TRIPLET
-
-      - name: Configure environment for bindgen/clang
-        shell: powershell
-        run: |
-          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
-          echo ("BINDGEN_EXTRA_CLANG_ARGS=-I{0}" -f `
-            (Join-Path $env:VCPKG_ROOT "installed\$env:VCPKG_DEFAULT_TRIPLET\include")) >> $env:GITHUB_ENV
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+      # Install LLVM so bindgen can find libclang on the runner
+      - name: Install LLVM (libclang)
+        uses: KyleMayes/install-llvm-action@v2
         with:
-          channel: stable
+          version: "17.0.6"
+          directory: ${{ runner.temp }}\llvm
 
-      - name: Enable Windows desktop
-        run: flutter config --enable-windows-desktop
+      # Have run-vcpkg clone vcpkg for us (no submodule needed)
+      - name: run vcpkg
+        id: vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ runner.temp }}\vcpkg
+          vcpkgGitURL: https://github.com/microsoft/vcpkg.git
+          # IMPORTANT: this must be a 40-char SHA1. The one below matches the tool
+          # version you saw in logs. You can keep it or change to another real SHA.
+          vcpkgGitCommitId: 4580816534ed8fd9634ac83d46471440edd82dfe
+          runVcpkgInstall: true
+          # If you don't have a vcpkg.json manifest, install the needed libs explicitly:
+          vcpkgArguments: >
+            opus:x64-windows-static
+            libvpx:x64-windows-static
+            libyuv:x64-windows-static
+            aom:x64-windows-static
 
-      - name: Get Flutter packages
-        working-directory: flutter
-        run: flutter pub get
+      # Export env so build scripts can find headers/libs and libclang
+      - name: Configure environment for build
+        shell: pwsh
+        run: |
+          echo "VCPKG_ROOT=${{ steps.vcpkg.outputs.vcpkgRootPath }}" >> $env:GITHUB_ENV
+          echo "VCPKG_DEFAULT_TRIPLET=x64-windows-static" >> $env:GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I${{ steps.vcpkg.outputs.vcpkgRootPath }}\installed\x64-windows-static\include" >> $env:GITHUB_ENV
+          echo "LIBCLANG_PATH=${{ runner.temp }}\llvm\bin" >> $env:GITHUB_ENV
+          echo "RUSTFLAGS=-Ctarget-feature=+crt-static" >> $env:GITHUB_ENV
 
-      - name: Build Flutter Windows Release
-        working-directory: flutter
-        run: flutter build windows --release
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+
+      - name: Build (Cargo)
+        run: cargo build --release
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenConnect-Windows
-          path: flutter/build/windows/x64/runner/Release/
+          name: ScreenConnect
+          path: |
+            target\release\*.exe
+            target\release\*.dll
+            target\release\*.pdb
