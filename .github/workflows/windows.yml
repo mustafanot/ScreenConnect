@@ -13,7 +13,6 @@ jobs:
     runs-on: windows-latest
 
     env:
-      # We’ll use static libs for easier linking on the runner
       VCPKG_DEFAULT_TRIPLET: x64-windows-static
 
     steps:
@@ -22,12 +21,10 @@ jobs:
         with:
           submodules: true
 
-      # Tooling we need for vcpkg + bindgen (libclang) + CMake/Ninja
       - name: Install build dependencies
         run: |
           choco install -y git cmake ninja llvm
 
-      # Bootstrap vcpkg in the runner's temp and expose it via env
       - name: Setup vcpkg (manual)
         shell: cmd
         run: |
@@ -35,7 +32,6 @@ jobs:
           "%RUNNER_TEMP%\vcpkg\bootstrap-vcpkg.bat"
           echo VCPKG_ROOT=%RUNNER_TEMP%\vcpkg>> "%GITHUB_ENV%"
 
-      # Install the native ports that your Rust build scripts bindgen against
       - name: Install libraries via vcpkg
         shell: powershell
         run: |
@@ -45,7 +41,6 @@ jobs:
             libyuv:$env:VCPKG_DEFAULT_TRIPLET `
             aom:$env:VCPKG_DEFAULT_TRIPLET
 
-      # Make libclang and vcpkg headers visible to bindgen on the runner
       - name: Configure environment for bindgen/clang
         shell: powershell
         run: |
@@ -53,8 +48,7 @@ jobs:
           echo ("BINDGEN_EXTRA_CLANG_ARGS=-I{0}" -f `
             (Join-Path $env:VCPKG_ROOT "installed\$env:VCPKG_DEFAULT_TRIPLET\include")) >> $env:GITHUB_ENV
 
-      # Optional: rename app/window strings BEFORE building (safe no-op if files differ)
-      # Comment this out if you don't want auto-rename.
+      # Optional: auto-rename “RustDesk” to “Screen Connect”
       - name: Rename app branding to 'Screen Connect'
         shell: powershell
         run: |
@@ -71,12 +65,10 @@ jobs:
             }
           }
 
-      # Flutter toolchain
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          # lock if you prefer, e.g. flutter-version: "3.19.6"
 
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
@@ -85,12 +77,10 @@ jobs:
         working-directory: flutter
         run: flutter pub get
 
-      # Build the Windows Runner
       - name: Build Flutter Windows Release
         working-directory: flutter
         run: flutter build windows --release
 
-      # Upload the produced EXE + DLLs
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
